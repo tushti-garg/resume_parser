@@ -2,6 +2,9 @@
 app.py
 Flask application exposing a single API endpoint (/api/parse) for resume
 parsing, and serving the static frontend.
+
+This version assumes a FLAT repo structure where app.py, parser.py, and
+index.html all live in the same root folder.
 """
 
 import os
@@ -10,18 +13,17 @@ from flask import Flask, request, jsonify, send_from_directory
 from parser import parse_resume
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-FRONTEND_DIR = os.path.join(os.path.dirname(BASE_DIR), "frontend")
 
 ALLOWED_EXTENSIONS = {".pdf", ".docx"}
 MAX_FILE_SIZE_MB = 5
 
-app = Flask(__name__, static_folder=FRONTEND_DIR, static_url_path="")
+app = Flask(__name__, static_folder=BASE_DIR, static_url_path="")
 app.config["MAX_CONTENT_LENGTH"] = MAX_FILE_SIZE_MB * 1024 * 1024
 
 
 @app.route("/")
 def index():
-    return send_from_directory(FRONTEND_DIR, "index.html")
+    return send_from_directory(BASE_DIR, "index.html")
 
 
 @app.route("/api/health")
