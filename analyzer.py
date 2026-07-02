@@ -135,3 +135,72 @@ def rank_resumes(parsed_list, jd_text=None):
     for i, r in enumerate(scored, start=1):
         r["rank"] = i
     return scored
+
+
+import re
+
+EXPERIENCE_YEARS_RE = re.compile(r"(\d+)\+?\s*(?:years|yrs)", re.I)
+
+ROLE_SKILL_PROFILES = {
+    "ml engineer": ["python", "pytorch", "tensorflow", "scikit-learn", "machine learning",
+                    "deep learning", "sql", "docker", "aws", "git"],
+    "data scientist": ["python", "r", "sql", "pandas", "numpy", "machine learning",
+                        "tableau", "power bi", "scikit-learn"],
+    "backend developer": ["python", "java", "sql", "django", "flask", "node.js",
+                           "docker", "kubernetes", "aws", "git"],
+    "frontend developer": ["javascript", "typescript", "react", "html", "css",
+                            "next.js", "tailwind", "git"],
+    "devops engineer": ["docker", "kubernetes", "terraform", "aws", "azure",
+                         "ci/cd", "jenkins", "linux", "bash"],
+    "product manager": ["agile", "scrum", "jira", "figma", "sql", "excel"],
+}
+
+
+def estimate_years_experience(text):
+    matches = [int(m) for m in EXPERIENCE_YEARS_RE.findall(text)]
+    return max(matches) if matches else 0
+
+
+def weighted_job_match(parsed, job):
+    """job = {'title', 'skills': [{'skill','weight'}], 'min_experience_years', 'experience_weight'}"""
+    resume_skills = set(parsed.get("skills", []))
+    years = estimate_years_experience(parsed.get("raw_text", ""))
+
+    total_weight = sum(s["weight"] for s in job["skills"]) + job["experience_weight"]
+    earned = 0
+    matched, missing = [], []
+
+    for s in job["skills"]:
+        if s["skill"] in resume_skills:
+            earned += s["weight"]
+            matched.append(s["skill"])
+        else:
+            missing.append(s["skill"])
+
+    exp_met = years >= job["min_experience_years"]
+    if exp_met:
+        earned += job["experience_weight"]
+
+    fit_score = round((earned / total_weight) * 100) if total_weight else 0
+    qualifies = exp_met and len(missing) <= max(1, len(job["skills"]) // 3)
+
+    return {
+        "fit_score": fit_score,
+        "matched_skills": matched,
+        "missing_skills": missing,
+        "years_detected": years,
+        "meets_min_experience": exp_met,
+        "qualifies": qualifies,
+    }
+
+
+def role_skill_gap(parsed, role_name):
+    role_key = role_name.lower().strip()
+    profile = ROLE_SKILL_PROFILES.get(role_key)
+    resume_skills = set(parsed.get("skills", []))
+    if not profile:
+        # unknown role -> just report what they have, no gap list
+        return {"matched_skills": sorted(resume_skills), "missing_skills": [], "role_recognized": False}
+    matched = sorted(resume_skills & set(profile))
+    missing = sorted(set(profile) - resume_skills)
+    return {"matched_skills": matched, "missing_skills": missing, "role_recognized": True}
