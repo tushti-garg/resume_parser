@@ -159,3 +159,136 @@ def dashboard():
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=5000, debug=False)
+
+from database import get_db
+from llm_service import explain_candidate_fit, explain_improvements
+import analyzer
+
+# ---------- Recruiter: create job posting ----------
+@app.route("/api/recruiter/jobs", methods=["POST"])
+@login_required
+def create_job():
+    data = request.get_json(force=True)
+    title = data.get("title", "").strip()
+    skills = data.get("skills", [])  # [{"skill": "python", "weight": 5}, ...]
+    min_exp = int(data.get("min_experience_years", 0))
+    exp_weight = int(data.get("experience_weight", 3))
+    if not title or not skills:
+        return jsonify({"error": "Title and at least one skill required"}), 400
+
+    with get_db() as conn:
+        cur = conn.execute(
+            "INSERT INTO job_postings (recruiter_id, title, min_experience_years, experience_weight) VALUES (?, ?, ?, ?)",
+            (session["user_id"], title, min_exp, exp_weight),
+        )
+        job_id = cur.lastrowid
+        for s in skills:
+            conn.execute(
+                "INSERT INTO job_skills (job_id, skill, weight) VALUES (?, ?, ?)",
+                (job_id, s["skill"].lower().strip(), int(s.get("weight", 3))),
+            )
+    return jsonify({"job_id": job_id}), 201
+
+
+@app.route("/api/recruiter/jobs", methods=["GET"])
+@login_required
+def list_jobs():
+    with get_db() as conn:
+        jobs = conn.execute(
+            "SELECT * FROM job_postings WHERE recruiter_id = ? ORDER BY created_at DESC",
+            (session["user_id"],),
+        ).fetchall()
+    return jsonify([dict(j) for j in jobs])
+
+
+def _load_job(job_id):
+    with get_db() as conn:
+        job_row = conn.execute("SELECT * FROM job_postings WHERE id = ?", (job_id,)).fetchone()
+        if not job_row:
+            return None
+        skills = conn.execute("SELECT skill, weight FROM job_skills WHERE job_id = ?", (job_id,)).fetchall()
+    return {
+        "title": job_row["title"],
+        "min_experience_years": job_row["min_experience_years"],
+        "experience_weight": job_row["experience_weight"],
+        "skills": [dict(s) for s in skills],
+    }
+
+
+# ---------- Recruiter: bulk upload against a job ----------
+@app.route("/api/recruiter/jobs/<int:job_id>/upload", methods=["POST"])
+@login_required
+def upload_for_job(job_id):
+    job = _load_job(job_id)
+    if not job:
+        return jsonify({"error": "Job not found"}), 404
+
+    files = request.files.getlist("resumes")
+    if not files:
+        return jsonify({"error": "No files uploaded"}), 400
+
+    results = []
+    for file in files:
+        if not allowed_file(file.filename):
+            continue
+        filename = secure_filename(file.filename)
+        try:
+            parsed = resume_parser.extract_all(filename, file.read())
+        except Exception:
+            continue
+        match = analyzer.weighted_job_match(parsed, job)
+        explanation = None
+        if match["qualifies"]:
+            explanation = explain_candidate_fit(parsed, job, match)
+
+        with get_db() as conn:
+            conn.execute(
+                """INSERT INTO job_results (job_id, candidate_name, filename, fit_score, qualifies, explanation)
+                   VALUES (?, ?, ?, ?, ?, ?)""",
+                (job_id, parsed.get("name"), filename, match["fit_score"], int(match["qualifies"]), explanation),
+            )
+
+        results.append({
+            "name": parsed.get("name"),
+            "filename": filename,
+            "fit_score": match["fit_score"],
+            "qualifies": match["qualifies"],
+            "matched_skills": match["matched_skills"],
+            "missing_skills": match["missing_skills"],
+            "years_detected": match["years_detected"],
+            "explanation": explanation,
+        })
+
+    results.sort(key=lambda r: r["fit_score"], reverse=True)
+    qualified = [r for r in results if r["qualifies"]]
+    return jsonify({"job": job["title"], "total": len(results), "qualified": qualified, "all_results": results})
+
+
+# ---------- Candidate: rate against a target role ----------
+@app.route("/api/candidate/analyze", methods=["POST"])
+def candidate_analyze():
+    if "resume" not in request.files:
+        return jsonify({"error": "No file uploaded"}), 400
+    file = request.files["resume"]
+    role = request.form.get("target_role", "").strip()
+    if not allowed_file(file.filename):
+        return jsonify({"error": "Please upload a PDF or DOCX file"}), 400
+
+    filename = secure_filename(file.filename)
+    parsed = resume_parser.extract_all(filename, file.read())
+    ats_result = analyzer.calculate_ats_score(parsed)
+    gap = analyzer.role_skill_gap(parsed, role) if role else {"matched_skills": [], "missing_skills": [], "role_recognized": False}
+    improvement_text = explain_improvements(parsed, role or "general", ats_result, gap)
+
+    save_history(filename, ats_result["score"], parsed.get("skills"))
+
+    return jsonify({
+        "name": parsed.get("name"),
+        "target_role": role,
+        "ats_score": ats_result["score"],
+        "breakdown": ats_result["breakdown"],
+        "role_recognized": gap["role_recognized"],
+        "matched_skills": gap["matched_skills"],
+        "missing_skills": gap["missing_skills"],
+        "improvement_feedback": improvement_text,
+    })
