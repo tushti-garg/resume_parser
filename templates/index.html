@@ -2,66 +2,105 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<title>Resume Parser & ATS Analyzer</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Resume Intelligence Platform</title>
 <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.4/chart.umd.min.js"></script>
 </head>
 <body>
-  <header>
-    <h1>📄 Resume Parser & ATS Analyzer</h1>
-    <nav id="tabs">
-      <button data-tab="analyze" class="active">Analyze</button>
-      <button data-tab="bulk">Bulk & Rank</button>
-      <button data-tab="dashboard">Dashboard</button>
-      <button data-tab="auth">Login / Register</button>
-    </nav>
-    <span id="auth-status">Not logged in</span>
-  </header>
+<div class="app-shell">
+  <aside class="sidebar">
+    <div class="brand">ResumeIQ</div>
+    <button class="nav-btn active" data-page="candidate">Candidate</button>
+    <button class="nav-btn" data-page="recruiter">Recruiter</button>
+    <button class="nav-btn" data-page="dashboard">Dashboard</button>
+    <button class="nav-btn" data-page="auth">Account</button>
+    <div id="auth-status">Not logged in</div>
+  </aside>
 
   <main>
-    <section id="analyze" class="tab active">
-      <h2>Single Resume Analysis</h2>
-      <input type="file" id="resume-file" accept=".pdf,.docx">
-      <textarea id="jd-text" placeholder="Paste a job description here (optional, enables JD match + skill gap)"></textarea>
-      <button id="analyze-btn">Analyze Resume</button>
+    <section id="candidate" class="page active">
+      <h2>Rate my resume</h2>
+      <div class="card">
+        <label class="hint">Resume file</label>
+        <input type="file" id="resume-file" accept=".pdf,.docx">
+        <label class="hint">Target role</label>
+        <select id="target-role">
+          <option value="">Select a role (or type custom below)</option>
+          <option value="ml engineer">ML engineer</option>
+          <option value="data scientist">Data scientist</option>
+          <option value="backend developer">Backend developer</option>
+          <option value="frontend developer">Frontend developer</option>
+          <option value="devops engineer">DevOps engineer</option>
+          <option value="product manager">Product manager</option>
+        </select>
+        <input type="text" id="custom-role" placeholder="Or type a custom role">
+        <button class="primary" id="analyze-btn" style="margin-top:0.6rem;">Analyze resume</button>
+      </div>
       <div id="analyze-result"></div>
     </section>
 
-    <section id="bulk" class="tab">
-      <h2>Bulk Parsing & Ranking</h2>
-      <input type="file" id="bulk-files" accept=".pdf,.docx" multiple>
-      <textarea id="bulk-jd-text" placeholder="Paste job description to rank candidates against it (optional)"></textarea>
-      <button id="bulk-btn">Parse & Rank All</button>
-      <div id="bulk-result"></div>
+    <section id="recruiter" class="page">
+      <h2>Recruiter tools</h2>
+      <div class="tab-toggle">
+        <button class="ghost active" id="tab-create-job">Create job posting</button>
+        <button class="ghost" id="tab-my-jobs">My job postings</button>
+      </div>
+
+      <div id="create-job-panel" class="card">
+        <label class="hint">Job title</label>
+        <input type="text" id="job-title" placeholder="e.g. Senior ML Engineer">
+        <label class="hint">Minimum years of experience</label>
+        <input type="number" id="job-min-exp" value="2" min="0">
+        <label class="hint">Experience weight (1-5)</label>
+        <input type="range" id="job-exp-weight" min="1" max="5" value="3">
+        <h3>Required skills & weights</h3>
+        <div id="skill-rows"></div>
+        <button class="ghost" id="add-skill-row" style="margin-top:6px;">+ Add skill</button>
+        <div style="margin-top:1rem;">
+          <button class="primary" id="create-job-btn">Create job posting</button>
+        </div>
+      </div>
+
+      <div id="my-jobs-panel" class="card" style="display:none;">
+        <div id="jobs-list"></div>
+      </div>
+
+      <div id="upload-panel" class="card" style="display:none;">
+        <h3 id="upload-job-title"></h3>
+        <input type="file" id="bulk-files" accept=".pdf,.docx" multiple>
+        <button class="primary" id="bulk-btn" style="margin-top:0.6rem;">Parse & rank candidates</button>
+        <div id="bulk-result"></div>
+      </div>
     </section>
 
-    <section id="dashboard" class="tab">
-      <h2>Dashboard</h2>
-      <p>Log in to see your parsing history and analytics.</p>
-      <div id="dashboard-stats"></div>
-      <canvas id="skills-chart" width="400" height="250"></canvas>
+    <section id="dashboard" class="page">
+      <h2>Your dashboard</h2>
+      <div id="dashboard-content">
+        <p class="hint">Log in to see your history and analytics.</p>
+      </div>
     </section>
 
-    <section id="auth" class="tab">
+    <section id="auth" class="page">
       <h2>Account</h2>
-      <div class="auth-forms">
-        <div>
-          <h3>Login</h3>
+      <div style="display:flex; gap:1.2rem; flex-wrap:wrap;">
+        <div class="card" style="flex:1; min-width:240px;">
+          <h3>Log in</h3>
           <input id="login-username" placeholder="Username">
           <input id="login-password" type="password" placeholder="Password">
-          <button id="login-btn">Log In</button>
+          <button class="primary" id="login-btn" style="margin-top:0.5rem;">Log in</button>
         </div>
-        <div>
+        <div class="card" style="flex:1; min-width:240px;">
           <h3>Register</h3>
           <input id="register-username" placeholder="Username">
           <input id="register-password" type="password" placeholder="Password">
-          <button id="register-btn">Register</button>
+          <button class="primary" id="register-btn" style="margin-top:0.5rem;">Register</button>
         </div>
       </div>
-      <div id="auth-message"></div>
+      <p id="auth-message" class="hint"></p>
     </section>
   </main>
-
-  <script src="{{ url_for('static', filename='app.js') }}"></script>
+</div>
+<script src="{{ url_for('static', filename='app.js') }}"></script>
 </body>
 </html>
