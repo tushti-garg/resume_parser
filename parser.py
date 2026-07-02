@@ -1,212 +1,129 @@
-"""
-parser.py
-Core resume-parsing logic: extracts text from PDF/DOCX and pulls out
-name, email, phone, skills, education, and experience using regex
-and keyword-based heuristics (no external NLP model required).
-"""
-
 import re
 import io
-from typing import Optional
-
 import pdfplumber
 import docx
-
-
-# ---------------------------------------------------------------------------
-# Reference data used for keyword matching
-# ---------------------------------------------------------------------------
-
-SKILL_KEYWORDS = [
-    "python", "java", "javascript", "typescript", "c++", "c#", "c",
-    "html", "css", "sql", "r", "go", "rust", "kotlin", "swift", "php",
-    "react", "angular", "vue", "node.js", "node", "express", "django",
-    "flask", "fastapi", "spring", "spring boot", ".net",
-    "machine learning", "deep learning", "nlp", "natural language processing",
-    "data science", "data analysis", "data visualization", "statistics",
-    "pandas", "numpy", "scikit-learn", "sklearn", "tensorflow", "pytorch",
-    "keras", "opencv",
-    "mysql", "postgresql", "mongodb", "sqlite", "redis", "firebase",
-    "aws", "azure", "gcp", "docker", "kubernetes", "git", "github",
-    "linux", "ci/cd", "rest api", "rest", "graphql", "microservices",
-    "agile", "scrum", "tableau", "power bi", "excel",
-]
-
-EDUCATION_KEYWORDS = [
-    "bachelor", "master", "b.tech", "btech", "m.tech", "mtech", "b.e",
-    "m.e", "b.sc", "m.sc", "bca", "mca", "phd", "ph.d", "diploma",
-    "university", "college", "institute", "school",
-]
-
-EXPERIENCE_SECTION_HEADERS = [
-    "experience", "work experience", "professional experience",
-    "employment history", "work history",
-]
-
-EDUCATION_SECTION_HEADERS = ["education", "academic background", "academics"]
-
-SECTION_HEADERS_ALL = EXPERIENCE_SECTION_HEADERS + EDUCATION_SECTION_HEADERS + [
-    "skills", "technical skills", "projects", "certifications",
-    "summary", "objective", "contact", "achievements", "awards",
-]
+from pdf2image import convert_from_bytes
+import pytesseract
 
 EMAIL_RE = re.compile(r"[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}")
-PHONE_RE = re.compile(
-    r"(\+?\d{1,3}[\s-]?)?(\(?\d{3,5}\)?[\s-]?)?\d{3,4}[\s-]?\d{3,4}"
-)
-LINKEDIN_RE = re.compile(r"(linkedin\.com/in/[A-Za-z0-9\-_/]+)", re.I)
-GITHUB_RE = re.compile(r"(github\.com/[A-Za-z0-9\-_/]+)", re.I)
+PHONE_RE = re.compile(r"(?:\+?\d{1,3}[-.\s]?)?\(?\d{3,4}\)?[-.\s]?\d{3}[-.\s]?\d{3,4}\b")
+URL_RE = re.compile(r"(https?://[^\s]+|(?:www\.)?linkedin\.com/[^\s]+|(?:www\.)?github\.com/[^\s]+)")
+
+SKILLS_DB = [
+    "python", "java", "c++", "c#", "javascript", "typescript", "sql", "r", "go", "rust",
+    "html", "css", "react", "angular", "vue", "node.js", "django", "flask", "fastapi",
+    "spring", "express", "next.js", "tailwind",
+    "aws", "azure", "gcp", "docker", "kubernetes", "terraform", "jenkins", "ci/cd",
+    "git", "github", "gitlab", "linux", "bash",
+    "machine learning", "deep learning", "nlp", "computer vision", "pytorch",
+    "tensorflow", "scikit-learn", "pandas", "numpy", "keras",
+    "mysql", "postgresql", "mongodb", "redis", "elasticsearch",
+    "excel", "tableau", "power bi", "figma", "jira", "agile", "scrum",
+]
+
+SECTION_HEADERS = ["experience", "education", "skills", "projects", "certifications",
+                    "summary", "objective", "achievements", "publications"]
 
 
-# ---------------------------------------------------------------------------
-# Text extraction
-# ---------------------------------------------------------------------------
-
-def extract_text_from_pdf(file_stream: io.BytesIO) -> str:
-    text_parts = []
-    with pdfplumber.open(file_stream) as pdf:
+def _extract_text_pdf(file_bytes):
+    text = ""
+    with pdfplumber.open(io.BytesIO(file_bytes)) as pdf:
         for page in pdf.pages:
             page_text = page.extract_text() or ""
-            text_parts.append(page_text)
-    return "\n".join(text_parts)
+            text += page_text + "\n"
+    # If almost no text was found, it's likely a scanned/image-based PDF -> OCR fallback
+    if len(text.strip()) < 40:
+        text = _ocr_pdf(file_bytes)
+    return text
 
 
-def extract_text_from_docx(file_stream: io.BytesIO) -> str:
-    document = docx.Document(file_stream)
+def _ocr_pdf(file_bytes):
+    text = ""
+    try:
+        images = convert_from_bytes(file_bytes)
+        for img in images:
+            text += pytesseract.image_to_string(img) + "\n"
+    except Exception as e:
+        text = ""
+    return text
+
+
+def _extract_text_docx(file_bytes):
+    document = docx.Document(io.BytesIO(file_bytes))
     return "\n".join(p.text for p in document.paragraphs)
 
 
-def extract_text(filename: str, file_bytes: bytes) -> str:
-    stream = io.BytesIO(file_bytes)
-    lower = filename.lower()
-    if lower.endswith(".pdf"):
-        return extract_text_from_pdf(stream)
-    elif lower.endswith(".docx"):
-        return extract_text_from_docx(stream)
+def extract_text(filename, file_bytes):
+    ext = filename.lower().rsplit(".", 1)[-1]
+    if ext == "pdf":
+        return _extract_text_pdf(file_bytes)
+    elif ext in ("docx", "doc"):
+        return _extract_text_docx(file_bytes)
     else:
-        raise ValueError("Unsupported file type. Please upload a .pdf or .docx file.")
+        raise ValueError("Unsupported file type: " + ext)
 
 
-# ---------------------------------------------------------------------------
-# Field extractors
-# ---------------------------------------------------------------------------
+def guess_name(text):
+    lines = [l.strip() for l in text.splitlines() if l.strip()]
+    for line in lines[:8]:
+        lower = line.lower()
+        if EMAIL_RE.search(line) or PHONE_RE.search(line) or URL_RE.search(line):
+            continue
+        if any(h in lower for h in SECTION_HEADERS):
+            continue
+        words = line.split()
+        if 1 <= len(words) <= 5 and all(w[0].isupper() for w in words if w[0].isalpha()):
+            return line
+    return lines[0] if lines else "Not found"
 
-def find_email(text: str) -> Optional[str]:
+
+def extract_email(text):
     match = EMAIL_RE.search(text)
     return match.group(0) if match else None
 
 
-def find_phone(text: str) -> Optional[str]:
-    for match in PHONE_RE.finditer(text):
-        candidate = match.group(0)
-        digits = re.sub(r"\D", "", candidate)
-        if 7 <= len(digits) <= 13:
-            return candidate.strip()
-    return None
+def extract_phone(text):
+    match = PHONE_RE.search(text)
+    return match.group(0) if match else None
 
 
-def find_links(text: str) -> dict:
-    linkedin = LINKEDIN_RE.search(text)
-    github = GITHUB_RE.search(text)
-    return {
-        "linkedin": ("https://" + linkedin.group(1)) if linkedin else None,
-        "github": ("https://" + github.group(1)) if github else None,
-    }
+def extract_links(text):
+    return list(set(URL_RE.findall(text)))
 
 
-def guess_name(text: str) -> Optional[str]:
-    """
-    Heuristic: the candidate's name is usually the first non-empty line
-    that isn't an email/phone/URL and doesn't look like a section header.
-    """
-    lines = [l.strip() for l in text.splitlines() if l.strip()]
-    for line in lines[:6]:
-        lower = line.lower()
-        if EMAIL_RE.search(line) or LINKEDIN_RE.search(line) or GITHUB_RE.search(line):
-            continue
-        if any(h in lower for h in SECTION_HEADERS_ALL):
-            continue
-        if len(line.split()) <= 5 and not any(ch.isdigit() for ch in line):
-            return line.title() if line.isupper() else line
-    return lines[0] if lines else None
-
-
-def find_skills(text: str) -> list:
+def extract_skills(text):
     lower = text.lower()
-    found = []
-    for skill in SKILL_KEYWORDS:
-        pattern = r"(?<![a-zA-Z])" + re.escape(skill) + r"(?![a-zA-Z])"
-        if re.search(pattern, lower):
-            found.append(skill)
-    # de-dupe, preserve a clean display order
-    seen = set()
-    ordered = []
-    for s in found:
-        if s not in seen:
-            seen.add(s)
-            ordered.append(s.title() if len(s) > 3 else s.upper())
-    return ordered
+    return sorted({s for s in SKILLS_DB if s in lower})
 
 
-def extract_section(text: str, headers: list) -> Optional[str]:
-    """
-    Grabs the block of text under a matching section header, stopping at
-    the next recognized section header.
-    """
+def extract_section(text, section_name, next_sections=None):
     lines = text.splitlines()
-    start_idx = None
+    start = None
     for i, line in enumerate(lines):
-        clean = line.strip().lower().rstrip(":")
-        if clean in headers:
-            start_idx = i + 1
+        if section_name in line.lower().strip():
+            start = i + 1
             break
-    if start_idx is None:
-        return None
-
-    collected = []
-    for line in lines[start_idx:]:
-        clean = line.strip().lower().rstrip(":")
-        if clean in SECTION_HEADERS_ALL and clean not in headers:
+    if start is None:
+        return ""
+    end = len(lines)
+    stop_words = next_sections or [s for s in SECTION_HEADERS if s != section_name]
+    for i in range(start, len(lines)):
+        if any(sw in lines[i].lower().strip() for sw in stop_words) and lines[i].strip():
+            end = i
             break
-        if line.strip():
-            collected.append(line.strip())
-    return "\n".join(collected) if collected else None
+    return "\n".join(lines[start:end]).strip()
 
 
-def find_education(text: str) -> str:
-    section = extract_section(text, EDUCATION_SECTION_HEADERS)
-    if section:
-        return section
-    # fallback: scan whole document for education keywords
-    lines = [l.strip() for l in text.splitlines() if l.strip()]
-    matches = [l for l in lines if any(k in l.lower() for k in EDUCATION_KEYWORDS)]
-    return "\n".join(matches) if matches else "Not found"
-
-
-def find_experience(text: str) -> str:
-    section = extract_section(text, EXPERIENCE_SECTION_HEADERS)
-    return section if section else "Not found"
-
-
-# ---------------------------------------------------------------------------
-# Main entry point
-# ---------------------------------------------------------------------------
-
-def parse_resume(filename: str, file_bytes: bytes) -> dict:
+def extract_all(filename, file_bytes):
     text = extract_text(filename, file_bytes)
-    if not text.strip():
-        raise ValueError("Could not extract any text from this file. It may be a scanned/image-based document.")
-
-    links = find_links(text)
-
     return {
+        "filename": filename,
         "name": guess_name(text),
-        "email": find_email(text),
-        "phone": find_phone(text),
-        "linkedin": links["linkedin"],
-        "github": links["github"],
-        "skills": find_skills(text),
-        "education": find_education(text),
-        "experience": find_experience(text),
-        "raw_text_preview": text[:800],
+        "email": extract_email(text),
+        "phone": extract_phone(text),
+        "links": extract_links(text),
+        "skills": extract_skills(text),
+        "education": extract_section(text, "education"),
+        "experience": extract_section(text, "experience"),
+        "raw_text": text,
     }
