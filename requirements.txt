@@ -6,3 +6,4 @@ pdf2image
 Pillow
 werkzeug
 gunicorn
+anthropic==0.39.0
