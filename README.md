@@ -1,126 +1,175 @@
-# Resume Parser
+# ResumeAI — Smart Resume Analyzer
 
-A web app that extracts key candidate details — name, email, phone, skills, education, and experience — from uploaded PDF or DOCX resumes. Built with a Python (Flask) backend and a vanilla HTML/CSS/JS frontend.
-
-## Demo
-
-Upload a resume → the app parses the text and returns structured fields in seconds.
+A dual-mode resume analysis tool built with Python (Flask) and vanilla JavaScript. Designed for both job seekers and recruiters.
 
 ![status](https://img.shields.io/badge/status-active-brightgreen)
 ![python](https://img.shields.io/badge/python-3.10%2B-blue)
 ![flask](https://img.shields.io/badge/flask-3.x-black)
+![license](https://img.shields.io/badge/license-MIT-green)
 
-## Features
+**Live Demo →** [resume-parser-3r3h.onrender.com](https://resume-parser-3r3h.onrender.com)
 
-- Upload `.pdf` or `.docx` resumes via drag-and-drop or file picker
-- Extracts: name, email, phone number, LinkedIn, GitHub, skills, education, experience
-- Skill detection against a curated keyword list covering languages, frameworks, cloud, and tools
-- Simple REST API (`/api/parse`) that returns clean JSON — easy to plug into other tools
-- No external NLP model or API key required; runs fully offline
+---
+
+## What it does
+
+### 🎯 Candidate Mode
+Upload your resume and enter your target role. Get:
+- An **ATS match score out of 100**
+- Score breakdown across 4 categories: Skill Match, Role Alignment, Experience Fit, Resume Quality
+- Matched vs missing skills highlighted
+- Specific, actionable improvement suggestions
+- Parsed contact info verification
+
+### 🏢 Recruiter Mode
+Upload up to **20 resumes at once**, set your job requirements, and get:
+- A **ranked shortlist** of candidates with match scores
+- Per-candidate skill coverage and gaps
+- Contact info (email, LinkedIn, GitHub) surfaced automatically
+- Top improvement note per candidate
+
+---
+
+## Demo
+
+| Candidate Mode | Recruiter Mode |
+|---|---|
+| Enter role → upload resume → get score + tips | Set requirements → upload resumes → ranked shortlist |
+
+---
 
 ## Tech Stack
 
-| Layer    | Technology              |
-|----------|--------------------------|
-| Backend  | Python, Flask            |
-| Parsing  | pdfplumber, python-docx, regex |
+| Layer | Technology |
+|---|---|
+| Backend | Python, Flask |
+| Parsing | pdfplumber, python-docx, regex |
+| Scoring | Custom NLP keyword + heuristic engine |
 | Frontend | HTML, CSS, JavaScript (no framework) |
+| Deployment | Render (free tier) |
+
+---
 
 ## Project Structure
 
 ```
 resume-parser/
-├── backend/
-│   ├── app.py              # Flask app + API routes
-│   ├── parser.py           # Core resume-parsing logic
-│   └── requirements.txt    # Python dependencies
-├── frontend/
-│   └── index.html          # Upload UI (served by Flask)
+├── app.py              # Flask app + 3 API endpoints
+├── parser.py           # PDF/DOCX text extraction
+├── analyzer.py         # Resume scoring and ranking engine
+├── index.html          # Dual-mode frontend (served by Flask)
+├── requirements.txt    # Python dependencies
 ├── sample_resumes/
-│   ├── sample_resume.txt   # Plain-text version for reference
-│   └── sample_resume.docx  # Try this file to test the app
-├── .gitignore
+│   └── sample_resume.docx   # Test file
 └── README.md
 ```
+
+---
 
 ## Getting Started
 
 ### Prerequisites
-- Python 3.10 or higher
+- Python 3.10+
 
 ### Installation
 
 ```bash
-# Clone the repo
-git clone https://github.com/tushti-garg/resume-parser.git
-cd resume-parser
-
-# Install dependencies
-pip install -r backend/requirements.txt
+git clone https://github.com/tushti-garg/resume_parser.git
+cd resume_parser
+pip install -r requirements.txt
 ```
 
-### Run the app
+### Run locally
 
 ```bash
-cd backend
 python app.py
 ```
 
-Open `http://localhost:5000` in your browser, upload a resume (try `sample_resumes/sample_resume.docx`), and click **Parse Resume**.
+Open `http://localhost:5000` in your browser.
+
+---
 
 ## API Reference
 
-### `POST /api/parse`
+### `POST /api/analyze`
+Candidate mode — single resume + job requirements → score + tips.
 
-Upload a resume file and receive parsed fields as JSON.
-
-**Request:** `multipart/form-data` with a `resume` field containing a `.pdf` or `.docx` file.
+**Form fields:**
+| Field | Type | Description |
+|---|---|---|
+| `resume` | file | PDF or DOCX resume |
+| `job_role` | string | Target job title |
+| `required_skills` | string | Comma-separated skills |
+| `experience_required` | string | e.g. "Fresher", "2+ years" |
 
 **Response:**
 ```json
 {
   "success": true,
-  "data": {
-    "name": "Aanya Sharma",
-    "email": "aanya.sharma@example.com",
-    "phone": "+91 9876543210",
-    "linkedin": "https://linkedin.com/in/aanyasharma",
-    "github": "https://github.com/aanyasharma",
-    "skills": ["Python", "Java", "SQL", "React", "Flask"],
-    "education": "Bachelor of Technology in Computer Science\nDelhi Technical University, 2021 - 2025",
-    "experience": "Software Engineering Intern, TechNova Pvt Ltd\n..."
+  "parsed": { "name": "...", "email": "...", "skills": [...] },
+  "analysis": {
+    "score": 78,
+    "grade": "Strong Match",
+    "matched_skills": ["Python", "Flask", "SQL"],
+    "missing_skills": ["Docker"],
+    "strengths": ["Covers 5/6 required skills", "GitHub profile linked"],
+    "improvements": ["Add quantified achievements", "Add a Projects section"],
+    "breakdown": {
+      "skill_match": 33,
+      "role_alignment": 15,
+      "experience_fit": 15,
+      "resume_quality": 15
+    }
   }
 }
 ```
 
+### `POST /api/rank`
+Recruiter mode — multiple resumes + job requirements → ranked list.
+
+**Form fields:** same as above, but `resumes` accepts multiple files (up to 20).
+
+### `POST /api/parse`
+Raw extraction only — no scoring. Returns name, email, phone, skills, education, experience.
+
 ### `GET /api/health`
-Returns `{"status": "ok"}` — useful for uptime checks.
+Returns `{"status": "ok"}`.
 
-## How It Works
+---
 
-1. **Text extraction** — `pdfplumber` extracts text from PDFs; `python-docx` reads paragraphs from DOCX files.
-2. **Field extraction** — regex patterns identify emails, phone numbers, and social links. The candidate's name is inferred from the first non-header line near the top of the document.
-3. **Skill matching** — the extracted text is checked against a curated list of ~70 common technical skills and tools.
-4. **Section extraction** — the parser looks for section headers like "Education" and "Experience" and captures the text block beneath each one until the next recognized header.
+## How the Scoring Works
+
+Scores are calculated across 4 dimensions (total 100 points):
+
+| Category | Max Points | How it's calculated |
+|---|---|---|
+| Skill Match | 40 | % of required skills found in resume text |
+| Role Alignment | 20 | Match against role-specific keyword bank |
+| Experience Fit | 15 | Detected experience level vs required |
+| Resume Quality | 25 | Sections present, action verbs, metrics, contact completeness |
+
+---
 
 ## Known Limitations
 
-- Resumes with complex multi-column layouts can confuse text-extraction order (this is a common limitation across most resume parsers, including commercial ATS tools).
-- Scanned/image-based PDFs (no embedded text layer) aren't supported — OCR is not included.
-- Skill and section detection rely on keyword/heading matching rather than a trained NLP model, so unconventional formatting may reduce accuracy.
+- Multi-column PDF layouts can affect text extraction order (common limitation across all resume parsers)
+- Scanned/image-based PDFs are not supported (no OCR)
+- Skill matching is keyword-based, not semantic — exact or near-exact matches required
 
 ## Roadmap
 
-- [ ] Add OCR support for scanned resumes (e.g., via `pytesseract`)
-- [ ] Score resumes against a pasted job description
-- [ ] Export parsed results as CSV/JSON download
-- [ ] Add unit tests with `pytest`
+- [ ] OCR support for scanned resumes
+- [ ] Export ranked results as CSV
+- [ ] Job description paste-in for automatic skill extraction
+- [ ] Unit tests with pytest
+
+---
 
 ## License
 
-MIT License — free to use, modify, and distribute.
+MIT — free to use, modify, and distribute.
 
 ## Author
 
-**Tushti Garg**
-[LinkedIn](https://www.linkedin.com/in/tushti-garg/) · [GitHub](https://github.com/tushti-garg)
+**Tushti Garg**  
+[LinkedIn](https://www.linkedin.com/in/tushti-garg/) · [GitHub](https://github.com/tushti-garg) · tushtigarg456@gmail.com
